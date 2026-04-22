@@ -632,7 +632,7 @@ async function renderLog(){
 }
 
 // Helper Functions
-function formatTime(iso){ if(!iso) return '--'; return new Date(iso).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',hour12:true}); }
+function formatTime(iso){ if(!iso) return '--'; return new Date(iso.replace(' ','T')+'+08:00').toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',hour12:true}); }
 function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function showToast(msg,type='info'){
