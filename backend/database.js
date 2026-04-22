@@ -1,113 +1,98 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 
-// Use DB_PATH env variable (set to /data/logbook.db on Render) or fallback to local
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'logbook.db');
+// Connect to Supabase PostgreSQL via DATABASE_URL env variable
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-// Create database connection
-const db = new sqlite3.Database(DB_PATH, (err) => {
+// Test connection and initialize tables
+pool.connect((err, client, release) => {
   if (err) {
     console.error('Error connecting to database:', err);
   } else {
-    console.log(`✅ Connected to SQLite database at ${DB_PATH}`);
+    console.log('✅ Connected to PostgreSQL database');
+    release();
     initializeDatabase();
   }
 });
 
 // Initialize database tables
 async function initializeDatabase() {
-  // Create logs table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      log_id TEXT UNIQUE NOT NULL,
-      lab TEXT NOT NULL,
-      student_id TEXT NOT NULL,
-      full_name TEXT NOT NULL,
-      program TEXT NOT NULL,
-      purpose TEXT NOT NULL,
-      time_in DATETIME NOT NULL,
-      time_out DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `, (err) => {
-    if (err) console.error('Error creating logs table:', err);
-    else console.log('✅ Logs table ready');
-  });
+  try {
+    // Create logs table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS logs (
+        id SERIAL PRIMARY KEY,
+        log_id TEXT UNIQUE NOT NULL,
+        lab TEXT NOT NULL,
+        student_id TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        program TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        time_in TIMESTAMP NOT NULL,
+        time_out TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Logs table ready');
 
-  // Create admin_users table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS admin_users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `, (err) => {
-    if (err) console.error('Error creating admin_users table:', err);
-    else {
-      console.log('✅ Admin users table ready');
-      // Use ADMIN_PASSWORD env variable or fallback to default (change this in production!)
-      const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-      const defaultPassword = bcrypt.hashSync(adminPassword, 10);
-      db.run(`
-        INSERT OR IGNORE INTO admin_users (username, password_hash)
-        VALUES (?, ?)
-      `, ['admin', defaultPassword], (err) => {
-        if (err) console.error('Error inserting default admin:', err);
-        else console.log('✅ Default admin user ready');
-      });
-    }
-  });
+    // Create admin_users table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Admin users table ready');
 
-  // Create activity_logs table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS activity_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      action TEXT NOT NULL,
-      user_type TEXT NOT NULL,
-      user_info TEXT,
-      details TEXT,
-      ip_address TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `, (err) => {
-    if (err) console.error('Error creating activity_logs table:', err);
-    else console.log('✅ Activity logs table ready');
-  });
+    // Insert default admin user if not exists
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    const defaultPassword = await bcrypt.hash(adminPassword, 10);
+    await pool.query(`
+      INSERT INTO admin_users (username, password_hash)
+      VALUES ($1, $2)
+      ON CONFLICT (username) DO NOTHING
+    `, ['admin', defaultPassword]);
+    console.log('✅ Default admin user ready');
+
+    // Create activity_logs table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id SERIAL PRIMARY KEY,
+        action TEXT NOT NULL,
+        user_type TEXT NOT NULL,
+        user_info TEXT,
+        details TEXT,
+        ip_address TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Activity logs table ready');
+
+  } catch (err) {
+    console.error('Error initializing database:', err);
+  }
 }
 
 // Helper functions
 function runQuery(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
+  return pool.query(sql, params);
 }
 
 function getQuery(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, result) => {
-      if (err) reject(err);
-      else resolve(result);
-    });
-  });
+  return pool.query(sql, params).then(result => result.rows[0]);
 }
 
 function allQuery(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
+  return pool.query(sql, params).then(result => result.rows);
 }
 
 module.exports = {
-  db,
+  pool,
   runQuery,
   getQuery,
   allQuery
